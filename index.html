@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shelf — Cloud File Cabinet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body { background: #0d0d0c; font-family: 'DM Sans', system-ui, sans-serif; color: #e8e2d9; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #111; } ::-webkit-scrollbar-thumb { background: #2a2a28; border-radius: 3px; }
+  input, textarea, button { font-family: inherit; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .spinning { animation: spin 1s linear infinite; display: inline-block; }
+  .fadein { animation: fadein 0.25s ease; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const BASE    = "https://storegit.pages.dev";
+const API_KEY = "sgk_eaVKQ0K6M5e64ku2hvmuvJuwkpXithGP-Cecl2-gP-o";
+const HDR     = { "X-API-Key": API_KEY };
+
+const toBase64 = f => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result.split(",")[1]);
+  r.onerror = rej;
+  r.readAsDataURL(f);
+});
+
+const fmtSize = b => {
+  if (!b) return "—";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1048576).toFixed(1) + " MB";
+};
+
+const fmtDate = d => {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+
+const EXT_META = {
+  pdf:  { icon: "ti-file-type-pdf",     col: "#e05252" },
+  txt:  { icon: "ti-file-text",         col: "#a3c4bc" },
+  md:   { icon: "ti-markdown",          col: "#7eb8d4" },
+  jpg:  { icon: "ti-photo",             col: "#d4a853" },
+  jpeg: { icon: "ti-photo",             col: "#d4a853" },
+  png:  { icon: "ti-photo",             col: "#d4a853" },
+  gif:  { icon: "ti-photo",             col: "#d4a853" },
+  svg:  { icon: "ti-vector",            col: "#c4a7e7" },
+  webp: { icon: "ti-photo",             col: "#d4a853" },
+  mp3:  { icon: "ti-music",             col: "#88c57f" },
+  wav:  { icon: "ti-music",             col: "#88c57f" },
+  mp4:  { icon: "ti-movie",             col: "#f4a261" },
+  mov:  { icon: "ti-movie",             col: "#f4a261" },
+  zip:  { icon: "ti-file-zip",          col: "#b4a7d6" },
+  rar:  { icon: "ti-file-zip",          col: "#b4a7d6" },
+  js:   { icon: "ti-brand-javascript",  col: "#f7df1e" },
+  ts:   { icon: "ti-brand-typescript",  col: "#3178c6" },
+  py:   { icon: "ti-brand-python",      col: "#4584b6" },
+  html: { icon: "ti-brand-html5",       col: "#e34c26" },
+  css:  { icon: "ti-brand-css3",        col: "#264de4" },
+  json: { icon: "ti-braces",            col: "#ffd700" },
+  csv:  { icon: "ti-table",             col: "#5aaa72" },
+};
+const getMeta = name => {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  return EXT_META[ext] || { icon: "ti-file", col: "#888" };
+};
+
+/* ── tiny shared styles ── */
+const card = {
+  background: "#111110", border: "1px solid #1e1e1c",
+  borderRadius: 12, padding: "1.1rem",
+};
+const label = {
+  fontSize: 12, color: "#555", display: "block",
+  marginBottom: 6, letterSpacing: "0.05em", textTransform: "uppercase",
+};
+const inp = {
+  width: "100%", padding: "10px 14px",
+  background: "#111110", border: "1px solid #222",
+  borderRadius: 8, color: "#e0d8cc", fontSize: 13, outline: "none",
+};
+const goldBtn = (disabled) => ({
+  padding: "10px 28px", background: disabled ? "#2a2a28" : "#d4a853",
+  border: "none", borderRadius: 8,
+  color: disabled ? "#555" : "#0d0d0c",
+  fontWeight: 600, fontSize: 14,
+  cursor: disabled ? "not-allowed" : "pointer",
+  display: "flex", alignItems: "center", gap: 8, transition: "all .15s",
+});
+const ghostBtn = {
+  padding: "10px 20px", background: "none",
+  border: "1px solid #2a2a28", borderRadius: 8,
+  color: "#666", fontSize: 14, cursor: "pointer",
+};
+const iconBtn = {
+  display: "flex", alignItems: "center", gap: 6,
+  padding: "7px 14px", background: "none",
+  border: "1px solid #2a2a28", borderRadius: 7,
+  color: "#666", fontSize: 13, cursor: "pointer",
+};
+
+/* ── Toast ── */
+function Toast({ s }) {
+  if (!s) return null;
+  const ic = { success: "ti-circle-check", error: "ti-alert-circle", info: "ti-info-circle" };
+  const bg = { success: "#0f2a12", error: "#2a0f0f", info: "#1a1a0f" };
+  const br = { success: "#1e4d22", error: "#4d1e1e", info: "#4d451e" };
+  const cl = { success: "#6dbf76", error: "#bf6d6d", info: "#bfad6d" };
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 24,
+      padding: "11px 18px", borderRadius: 10, fontSize: 13, zIndex: 999,
+      display: "flex", alignItems: "center", gap: 8,
+      background: bg[s.type], border: `1px solid ${br[s.type]}`, color: cl[s.type],
+      boxShadow: "0 4px 24px rgba(0,0,0,.5)", animation: "fadein .25s ease",
+    }}>
+      <i className={`ti ${ic[s.type]}`} style={{ fontSize: 15 }} />
+      {s.text}
+    </div>
+  );
+}
+
+/* ── File card ── */
+function FileCard({ file, onDownload, onDelete }) {
+  const m = getMeta(file.name);
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      style={{ ...card, borderColor: hov ? "#2e2e2c" : "#1e1e1c", transition: "border-color .2s", display: "flex", flexDirection: "column" }}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+    >
+      <i className={`ti ${m.icon}`} style={{ fontSize: 32, color: m.col, marginBottom: 10 }} />
+      <p style={{ fontSize: 13, fontWeight: 500, color: "#e0d8cc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
+        {file.name}
+      </p>
+      <p style={{ fontSize: 11, color: "#444", marginBottom: 12 }}>
+        {fmtSize(file.size)}{file.last_modified ? " · " + fmtDate(file.last_modified) : ""}
+      </p>
+      <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+        <button
+          onClick={() => onDownload(file)}
+          style={{ flex: 1, padding: "6px 0", background: "none", border: "1px solid #2a2a28", color: "#666", borderRadius: 6, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+        >
+          <i className="ti ti-download" style={{ fontSize: 13 }} /> Download
+        </button>
+        <button
+          onClick={() => onDelete(file)}
+          style={{ padding: "6px 10px", background: "none", border: "1px solid #3a1a1a", color: "#844", borderRadius: 6, fontSize: 12, cursor: "pointer" }}
+        >
+          <i className="ti ti-trash" style={{ fontSize: 13 }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Upload row ── */
+function UploadRow({ item }) {
+  const m = getMeta(item.name);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", ...card, borderRadius: 10 }}>
+      <i className={`ti ${m.icon}`} style={{ fontSize: 20, color: m.col, flexShrink: 0 }} />
+      <span style={{ flex: 1, fontSize: 13, color: "#e0d8cc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+      {item.state === "uploading" && <span style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 5 }}><i className="ti ti-loader spinning" style={{ fontSize: 13 }} /> Uploading</span>}
+      {item.state === "done"      && <span style={{ fontSize: 12, color: "#6dbf76", display: "flex", alignItems: "center", gap: 5 }}><i className="ti ti-circle-check" style={{ fontSize: 13 }} /> Done</span>}
+      {item.state === "error"     && <span style={{ fontSize: 12, color: "#bf6d6d", display: "flex", alignItems: "center", gap: 5 }}><i className="ti ti-alert-circle" style={{ fontSize: 13 }} /> {item.err}</span>}
+    </div>
+  );
+}
+
+/* ── Main app ── */
+export default function App() {
+  const [files,    setFiles]    = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [view,     setView]     = useState("files");
+  const [search,   setSearch]   = useState("");
+  const [note,     setNote]     = useState("");
+  const [noteName, setNoteName] = useState("");
+  const [drag,     setDrag]     = useState(false);
+  const [uploads,  setUploads]  = useState([]);
+  const [toast,    setToast]    = useState(null);
+  const [saving,   setSaving]   = useState(false);
+  const fileRef = useRef();
+  const timerRef = useRef();
+
+  const notify = useCallback((type, text) => {
+    setToast({ type, text });
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const loadFiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${BASE}/api/files`, { headers: HDR });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setFiles(Array.isArray(d) ? d : d.files || []);
+    } catch (e) { notify("error", "Could not load files — " + e.message); }
+    finally { setLoading(false); }
+  }, [notify]);
+
+  useEffect(() => { loadFiles(); }, [loadFiles]);
+
+  const handleDelete = async f => {
+    if (!window.confirm(`Delete "${f.name}"?`)) return;
+    try {
+      const r = await fetch(`${BASE}/api/delete`, {
+        method: "DELETE",
+        headers: { ...HDR, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: f.name, sha: f.sha }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      notify("success", `"${f.name}" deleted`);
+      setFiles(p => p.filter(x => x.name !== f.name));
+    } catch (e) { notify("error", "Delete failed — " + e.message); }
+  };
+
+  const handleDownload = async f => {
+    try {
+      notify("info", `Downloading "${f.name}"…`);
+      const blob = await fetch(`${BASE}/api/download?name=${encodeURIComponent(f.name)}`, { headers: HDR })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+      const url = URL.createObjectURL(blob);
+      Object.assign(document.createElement("a"), { href: url, download: f.name }).click();
+      URL.revokeObjectURL(url);
+      notify("success", `Downloaded "${f.name}"`);
+    } catch (e) { notify("error", "Download failed — " + e.message); }
+  };
+
+  const uploadFile = async f => {
+    if (f.size > 5 * 1024 * 1024) { notify("error", `"${f.name}" exceeds 5 MB`); return; }
+    const id = Math.random().toString(36).slice(2);
+    setUploads(u => [...u, { id, name: f.name, state: "uploading" }]);
+    try {
+      const content = await toBase64(f);
+      const r = await fetch(`${BASE}/api/upload`, {
+        method: "POST",
+        headers: { ...HDR, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: f.name, content }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setUploads(u => u.map(x => x.id === id ? { ...x, state: "done" } : x));
+      setTimeout(() => setUploads(u => u.filter(x => x.id !== id)), 2500);
+      notify("success", `"${f.name}" uploaded`);
+      loadFiles();
+    } catch (e) {
+      setUploads(u => u.map(x => x.id === id ? { ...x, state: "error", err: e.message } : x));
+      notify("error", `Upload failed — ${e.message}`);
+    }
+  };
+
+  const saveNote = async () => {
+    if (!note.trim()) { notify("error", "Note is empty"); return; }
+    const raw  = noteName.trim();
+    const name = raw ? (raw.includes(".") ? raw : raw + ".txt") : `note-${Date.now()}.txt`;
+    setSaving(true);
+    try {
+      const bytes = new TextEncoder().encode(note);
+      let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+      const r = await fetch(`${BASE}/api/upload`, {
+        method: "POST",
+        headers: { ...HDR, "Content-Type": "application/json" },
+        body: JSON.stringify({ name, content: btoa(bin) }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      notify("success", `"${name}" saved to cloud`);
+      setNote(""); setNoteName(""); loadFiles();
+    } catch (e) { notify("error", "Save failed — " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const filtered = files.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+  const totalSize = files.reduce((a, f) => a + (f.size || 0), 0);
+
+  const navItems = [
+    { id: "files",  icon: "ti-files",       label: "All Files" },
+    { id: "notes",  icon: "ti-notes",        label: "Quick Note" },
+    { id: "upload", icon: "ti-cloud-upload", label: "Upload" },
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0d0d0c", display: "flex" }}>
+
+      {/* ── Sidebar ── */}
+      <aside style={{
+        width: 230, background: "#111110", borderRight: "1px solid #1e1e1c",
+        padding: "1.75rem 1rem", display: "flex", flexDirection: "column", gap: 4, flexShrink: 0,
+      }}>
+        <div style={{ padding: "0 .75rem 1.75rem", borderBottom: "1px solid #1e1e1c", marginBottom: ".75rem" }}>
+          <p style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 26, fontWeight: 700, color: "#f0e8d8", letterSpacing: "-.5px" }}>Shelf</p>
+          <p style={{ fontSize: 11, color: "#555", marginTop: 4, letterSpacing: ".08em", textTransform: "uppercase" }}>
+            {files.length} file{files.length !== 1 ? "s" : ""} stored
+          </p>
+        </div>
+
+        {navItems.map(({ id, icon, label }) => (
+          <button key={id} onClick={() => setView(id)} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "9px 12px", borderRadius: 8, border: "none",
+            background: view === id ? "#1c1c1a" : "transparent",
+            color: view === id ? "#d4a853" : "#666",
+            fontSize: 14, cursor: "pointer", textAlign: "left", width: "100%", transition: "all .15s",
+          }}>
+            <i className={`ti ${icon}`} style={{ fontSize: 17 }} />
+            {label}
+          </button>
+        ))}
+
+        <div style={{ marginTop: "auto", paddingTop: "1rem", borderTop: "1px solid #1e1e1c" }}>
+          <p style={{ fontSize: 11, color: "#333", padding: "0 12px" }}>storegit.pages.dev</p>
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <main style={{ flex: 1, padding: "2rem 2.5rem", overflowY: "auto", minWidth: 0 }}>
+
+        {/* FILES */}
+        {view === "files" && (
+          <section className="fadein">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.75rem", flexWrap: "wrap", gap: 12 }}>
+              <h2 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 600, color: "#f0e8d8" }}>All Files</h2>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ position: "relative" }}>
+                  <i className="ti ti-search" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#444" }} />
+                  <input
+                    value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search files…"
+                    style={{ ...inp, paddingLeft: 32, width: 200 }}
+                  />
+                </div>
+                <button style={iconBtn} onClick={loadFiles}>
+                  <i className={`ti ti-refresh ${loading ? "spinning" : ""}`} style={{ fontSize: 14 }} /> Refresh
+                </button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "5rem", color: "#444", border: "1px dashed #222", borderRadius: 14 }}>
+                <i className="ti ti-loader spinning" style={{ fontSize: 20 }} /> Loading…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div style={{ border: "1px dashed #222", borderRadius: 14, padding: "5rem 2rem", textAlign: "center", color: "#444" }}>
+                <i className="ti ti-folders" style={{ fontSize: 44, display: "block", marginBottom: 16 }} />
+                <p style={{ fontSize: 15 }}>{search ? `No files matching "${search}"` : "No files yet — upload something!"}</p>
+                {!search && (
+                  <button onClick={() => setView("upload")} style={{ ...goldBtn(false), margin: "16px auto 0", justifyContent: "center" }}>
+                    Upload Now
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+                {filtered.map(f => (
+                  <FileCard key={f.name} file={f} onDownload={handleDownload} onDelete={handleDelete} />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* NOTES */}
+        {view === "notes" && (
+          <section className="fadein" style={{ maxWidth: 660 }}>
+            <h2 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 600, color: "#f0e8d8", marginBottom: "1.75rem" }}>Quick Note</h2>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={label}>File name</label>
+              <div style={{ display: "flex", alignItems: "center", background: "#111110", border: "1px solid #222", borderRadius: 8, overflow: "hidden" }}>
+                <i className="ti ti-file-text" style={{ fontSize: 15, color: "#555", padding: "0 10px" }} />
+                <input
+                  placeholder="my-note  (auto-names if blank)"
+                  value={noteName} onChange={e => setNoteName(e.target.value)}
+                  style={{ flex: 1, padding: "10px 12px 10px 0", background: "none", border: "none", color: "#e0d8cc", fontSize: 13, outline: "none" }}
+                />
+                <span style={{ padding: "0 12px", fontSize: 12, color: "#444" }}>{noteName && !noteName.includes(".") ? ".txt" : ""}</span>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={label}>Content</label>
+              <textarea
+                placeholder="Start writing…"
+                value={note} onChange={e => setNote(e.target.value)}
+                rows={16}
+                style={{ ...inp, padding: 16, fontFamily: "'DM Mono', 'Courier New', monospace", lineHeight: 1.75, resize: "vertical" }}
+              />
+              <p style={{ textAlign: "right", fontSize: 11, color: "#444", marginTop: 6 }}>
+                {note.length} chars · {note.split(/\n/).length} lines
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveNote} disabled={saving || !note.trim()} style={goldBtn(saving || !note.trim())}>
+                <i className={`ti ${saving ? "ti-loader spinning" : "ti-cloud-upload"}`} style={{ fontSize: 15 }} />
+                {saving ? "Saving…" : "Save to Cloud"}
+              </button>
+              <button onClick={() => { setNote(""); setNoteName(""); }} style={ghostBtn}>Clear</button>
+            </div>
+          </section>
+        )}
+
+        {/* UPLOAD */}
+        {view === "upload" && (
+          <section className="fadein">
+            <h2 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 22, fontWeight: 600, color: "#f0e8d8", marginBottom: "1.75rem" }}>Upload Files</h2>
+
+            <div
+              role="button" tabIndex={0}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={e => { e.preventDefault(); setDrag(false); Array.from(e.dataTransfer.files).forEach(uploadFile); }}
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={e => e.key === "Enter" && fileRef.current?.click()}
+              style={{
+                border: `2px dashed ${drag ? "#d4a853" : "#2a2a28"}`,
+                borderRadius: 16, padding: "5rem 2rem", textAlign: "center", cursor: "pointer",
+                background: drag ? "rgba(212,168,83,.04)" : "transparent", transition: "all .2s",
+              }}
+            >
+              <i className="ti ti-cloud-upload" style={{ fontSize: 52, color: drag ? "#d4a853" : "#2e2e2c", display: "block", marginBottom: 20 }} />
+              <p style={{ color: "#c0b8ac", fontSize: 16, fontWeight: 500, marginBottom: 8 }}>
+                {drag ? "Release to upload" : "Drop files here or click to browse"}
+              </p>
+              <p style={{ color: "#444", fontSize: 13 }}>Any file type · max 5 MB per file</p>
+              <input ref={fileRef} type="file" multiple style={{ display: "none" }}
+                onChange={e => { Array.from(e.target.files).forEach(uploadFile); e.target.value = ""; }} />
+            </div>
+
+            {uploads.length > 0 && (
+              <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", gap: 8 }}>
+                <p style={{ ...label, marginBottom: 4 }}>Transfers</p>
+                {uploads.map(item => <UploadRow key={item.id} item={item} />)}
+              </div>
+            )}
+
+            <div style={{ marginTop: "2rem", padding: "1.25rem 1.5rem", ...card, borderRadius: 12 }}>
+              <p style={{ ...label, marginBottom: 10 }}>Storage info</p>
+              <div style={{ display: "flex", gap: "2.5rem", flexWrap: "wrap" }}>
+                {[
+                  { l: "Total files", v: files.length },
+                  { l: "Total size",  v: fmtSize(totalSize) },
+                  { l: "File limit",  v: "5 MB" },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <p style={{ fontSize: 11, color: "#555", marginBottom: 4 }}>{l}</p>
+                    <p style={{ fontSize: 22, fontWeight: 600, color: "#d4a853" }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+
+      <Toast s={toast} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
