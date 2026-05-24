@@ -89,22 +89,6 @@ body{height:100%;font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e4f0;
 .read-btn:active{transform:scale(.96)}
 .read-btn.danger{border-color:#3a1020;color:var(--danger);background:#1a080e}
 #read-panel{display:flex;flex-direction:column}
-/* setup screen */
-#setup{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;padding:32px;z-index:100;gap:0}
-#setup.show{display:flex}
-.setup-logo{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;letter-spacing:-1px;margin-bottom:6px}
-.setup-logo span{color:var(--accent)}
-.setup-sub{font-size:13px;color:var(--text3);margin-bottom:28px;text-align:center;line-height:1.6;max-width:280px}
-.setup-card{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;gap:14px}
-.setup-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);margin-bottom:5px}
-.setup-input{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none}
-.setup-input:focus{border-color:var(--accent2)}
-.setup-input::placeholder{color:var(--text3)}
-.setup-hint{font-size:11px;color:var(--text3);line-height:1.6}
-.setup-hint a{color:var(--accent2);text-decoration:none}
-.setup-btn{padding:14px;background:linear-gradient(135deg,var(--accent2),#7b4fd4);border:none;border-radius:12px;color:#fff;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s}
-.setup-btn:active{transform:scale(.97)}
-.setup-err{font-size:12px;color:var(--danger);min-height:16px}
 /* toast */
 #toast{position:fixed;bottom:calc(24px + var(--sb));left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:11px 20px;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;z-index:300;opacity:0;transition:all .25s;pointer-events:none;display:flex;align-items:center;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -128,20 +112,6 @@ body{height:100%;font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e4f0;
 </head>
 <body>
 
-<div id="setup">
-  <div class="setup-logo"><span>V</span>aulTxt</div>
-  <div class="setup-sub">Enter your StoreGit API key to get started.<br>You can generate one from your StoreGit dashboard.</div>
-  <div class="setup-card">
-    <div>
-      <div class="setup-label">API Key</div>
-      <input id="setup-key" class="setup-input" type="password" placeholder="sgk_…" autocomplete="off" spellcheck="false"/>
-    </div>
-    <div class="setup-err" id="setup-err"></div>
-    <div class="setup-hint">Get your key from <a href="https://storegit.pages.dev" target="_blank">storegit.pages.dev</a> → Developer API → New Key</div>
-    <button class="setup-btn" id="setup-btn">Connect</button>
-  </div>
-</div>
-
 <div id="app">
   <div id="topbar">
     <div class="topbar-inner">
@@ -153,9 +123,6 @@ body{height:100%;font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e4f0;
         <span class="storage-badge" id="storage-badge">—</span>
         <button class="icon-btn" id="refresh-btn" title="Refresh">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        </button>
-        <button class="icon-btn" id="signout-btn" title="Sign out">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
     </div>
@@ -229,60 +196,207 @@ body{height:100%;font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e4f0;
   </div>
 </div>
 
-<script src="storegit.js"></script>
 <script>
 'use strict';
-const KEY_STORAGE = 'vaultxt_apikey';
-let sg = null, allFiles = [], currentFile = null, activeExt = '.txt', toastTimer, confirmCb = null;
+
+// ─────────────────────────────────────────────────────────────
+//  CONFIGURATION  —  paste your StoreGit API key here
+// ─────────────────────────────────────────────────────────────
+const API_KEY  = 'sgk_YOUR_KEY_HERE';          // ← your key
+const API_BASE = 'https://storegit.pages.dev'; // ← your StoreGit URL
+// ─────────────────────────────────────────────────────────────
+
+// ── Thin StoreGit API wrapper (no external library needed) ───
+//
+//  Every method sends X-API-Key and hits the correct endpoint.
+//  The StoreGit API reference is at:  GET <API_BASE>/api/
+//
+const api = {
+
+  // List all files in the active repo
+  list() {
+    return _get('files');
+  },
+
+  // Read a file as plain text  (used for the note viewer)
+  async readText(name) {
+    const r = await fetch(`${API_BASE}/api/download?name=${encodeURIComponent(name)}`, {
+      headers: { 'X-API-Key': API_KEY },
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${r.status}`);
+    }
+    return r.text();
+  },
+
+  // Upload a text note  (content → UTF-8 → base64, ≤ 5 MB)
+  upload(name, textContent) {
+    const b64 = btoa(unescape(encodeURIComponent(textContent)));
+    return _post('upload', { name, content: b64 });
+  },
+
+  // Delete a file.  Pass sha for regular files, omit for chunked.
+  delete(name, sha, chunked = false) {
+    return _del('delete', chunked ? { name, chunked: true } : { name, sha });
+  },
+
+  // Download a file as a browser Save-As dialog
+  async saveAs(name) {
+    const r = await fetch(`${API_BASE}/api/download?name=${encodeURIComponent(name)}`, {
+      headers: { 'X-API-Key': API_KEY },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+};
+
+// ── Internal fetch helpers ────────────────────────────────────
+
+async function _get(path) {
+  const r = await fetch(`${API_BASE}/api/${path}`, {
+    headers: { 'X-API-Key': API_KEY },
+  });
+  return _unwrap(r);
+}
+async function _post(path, body) {
+  const r = await fetch(`${API_BASE}/api/${path}`, {
+    method: 'POST',
+    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return _unwrap(r);
+}
+async function _del(path, body) {
+  const r = await fetch(`${API_BASE}/api/${path}`, {
+    method: 'DELETE',
+    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return _unwrap(r);
+}
+async function _unwrap(r) {
+  const ct = r.headers.get('Content-Type') || '';
+  const data = ct.includes('json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || `HTTP ${r.status}`);
+  return data;
+}
+
+// ── App state ─────────────────────────────────────────────────
+let allFiles = [], currentFile = null, activeExt = '.txt', toastTimer, confirmCb = null;
 const $ = id => document.getElementById(id);
 
+// ── Toast ─────────────────────────────────────────────────────
 function toast(msg, type = 'info') {
-  const el = $('toast'), icons = { success:'✓', error:'✕', info:'·' };
+  const el = $('toast'), icons = { success: '✓', error: '✕', info: '·' };
   el.textContent = (icons[type] || '·') + ' ' + msg;
   el.className = 'show ' + type;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
 }
+
+// ── Confirm sheet ─────────────────────────────────────────────
 function confirm(title, sub, cb) {
   $('sheet-title').textContent = title;
   $('sheet-sub').textContent   = sub;
   confirmCb = cb;
   $('confirm-sheet').classList.add('show');
 }
-$('sheet-confirm').onclick = () => { $('confirm-sheet').classList.remove('show'); if (confirmCb) { confirmCb(); confirmCb = null; } };
-$('sheet-cancel').onclick  = () => { $('confirm-sheet').classList.remove('show'); confirmCb = null; };
-$('confirm-sheet').addEventListener('click', e => { if (e.target === $('confirm-sheet')) { $('confirm-sheet').classList.remove('show'); confirmCb = null; } });
+$('sheet-confirm').onclick = () => {
+  $('confirm-sheet').classList.remove('show');
+  if (confirmCb) { confirmCb(); confirmCb = null; }
+};
+$('sheet-cancel').onclick = () => { $('confirm-sheet').classList.remove('show'); confirmCb = null; };
+$('confirm-sheet').addEventListener('click', e => {
+  if (e.target === $('confirm-sheet')) { $('confirm-sheet').classList.remove('show'); confirmCb = null; }
+});
 
-function fmtSize(b) { if (!b) return '—'; if (b < 1024) return b+'B'; if (b < 1048576) return (b/1024).toFixed(1)+'KB'; return (b/1048576).toFixed(1)+'MB'; }
-function fmtDate(d) { if (!d) return ''; const diff = Date.now() - new Date(d); if (diff < 60000) return 'just now'; if (diff < 3600000) return Math.floor(diff/60000)+'m ago'; if (diff < 86400000) return Math.floor(diff/3600000)+'h ago'; if (diff < 604800000) return Math.floor(diff/86400000)+'d ago'; return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
-function fileEmoji(n) { const e = (n||'').split('.').pop().toLowerCase(); return {txt:'📄',md:'📝',json:'🗂',csv:'📊',log:'📋',yaml:'⚙️',yml:'⚙️',sh:'💻',bash:'💻',js:'🟨',ts:'🔷',py:'🐍',html:'🌐',css:'🎨',xml:'📦',sql:'🗄',rb:'💎'}[e]||'📄'; }
+// ── Helpers ───────────────────────────────────────────────────
+function fmtSize(b) {
+  if (!b) return '—';
+  if (b < 1024)    return b + 'B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + 'KB';
+  return (b / 1048576).toFixed(1) + 'MB';
+}
+function fmtDate(d) {
+  if (!d) return '';
+  const diff = Date.now() - new Date(d);
+  if (diff < 60000)    return 'just now';
+  if (diff < 3600000)  return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function fileEmoji(n) {
+  const e = (n || '').split('.').pop().toLowerCase();
+  return { txt:'📄', md:'📝', json:'🗂', csv:'📊', log:'📋', yaml:'⚙️', yml:'⚙️',
+           sh:'💻', bash:'💻', js:'🟨', ts:'🔷', py:'🐍', html:'🌐', css:'🎨',
+           xml:'📦', sql:'🗄', rb:'💎' }[e] || '📄';
+}
 function showPanel(n) {
-  ['vault-panel','write-panel','read-panel'].forEach(id => $(id).classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === n || (n === 'read' && t.dataset.tab === 'vault')));
-  $(n + (n === 'read' ? '-panel' : '-panel')).classList.add('active');
+  ['vault-panel', 'write-panel', 'read-panel'].forEach(id => $(id).classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === n || (n === 'read' && t.dataset.tab === 'vault'))
+  );
+  $(n + '-panel').classList.add('active');
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showPanel(t.dataset.tab)));
 
+// ── File list ─────────────────────────────────────────────────
 function renderList(files) {
-  const q = $('search').value.trim().toLowerCase();
-  const filtered = q ? files.filter(f => (f.originalName||f.name).toLowerCase().includes(q)) : files;
-  $('list-label').textContent = q ? `${filtered.length} result${filtered.length!==1?'s':''} for "${q}"` : `${files.length} note${files.length!==1?'s':''}`;
+  const q        = $('search').value.trim().toLowerCase();
+  const filtered = q ? files.filter(f => (f.originalName || f.name).toLowerCase().includes(q)) : files;
+  $('list-label').textContent = q
+    ? `${filtered.length} result${filtered.length !== 1 ? 's' : ''} for "${q}"`
+    : `${files.length} note${files.length !== 1 ? 's' : ''}`;
+
   const list = $('file-list');
-  if (!filtered.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">${q?'🔍':'🗄'}</div><div class="empty-title">${q?'Nothing found':'Vault is empty'}</div><div class="empty-sub">${q?`No notes match "${q}"`:'Tap Write to create your first note'}</div></div>`; return; }
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">${q ? '🔍' : '🗄'}</div>
+      <div class="empty-title">${q ? 'Nothing found' : 'Vault is empty'}</div>
+      <div class="empty-sub">${q ? `No notes match "${q}"` : 'Tap Write to create your first note'}</div>
+    </div>`;
+    return;
+  }
   list.innerHTML = '';
   filtered.forEach((f, i) => {
     const name = f.originalName || f.name;
     const item = document.createElement('div');
     item.className = 'file-item';
     item.style.animationDelay = (i * 0.04) + 's';
-    item.innerHTML = `<div class="file-icon">${fileEmoji(name)}</div><div class="file-info"><div class="file-name">${name}</div><div class="file-meta">${fmtSize(f.size)}${f.uploadedAt?' · '+fmtDate(f.uploadedAt):''}</div></div><div class="file-actions"><button class="fac" data-a="dl"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button><button class="fac del" data-a="del"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button></div>`;
+    item.innerHTML = `
+      <div class="file-icon">${fileEmoji(name)}</div>
+      <div class="file-info">
+        <div class="file-name">${name}</div>
+        <div class="file-meta">${fmtSize(f.size)}${f.uploadedAt ? ' · ' + fmtDate(f.uploadedAt) : ''}</div>
+      </div>
+      <div class="file-actions">
+        <button class="fac" data-a="dl" title="Download">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="fac del" data-a="del" title="Delete">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>`;
+
     item.addEventListener('click', e => { if (!e.target.closest('.fac')) openFile(f); });
-    item.querySelector('[data-a="dl"]').addEventListener('click', e => { e.stopPropagation(); sg.download(name).catch(err => toast(err.message, 'error')); });
+    item.querySelector('[data-a="dl"]').addEventListener('click', e => {
+      e.stopPropagation();
+      api.saveAs(name).catch(err => toast(err.message, 'error'));
+    });
     item.querySelector('[data-a="del"]').addEventListener('click', e => {
       e.stopPropagation();
       confirm('Delete note?', name, async () => {
-        try { await sg.delete(f.name, f.sha); toast('Deleted', 'success'); await loadFiles(); }
-        catch (err) { toast(err.message, 'error'); }
+        try {
+          await api.delete(f.name, f.sha, f.chunked);
+          toast('Deleted', 'success');
+          await loadFiles();
+        } catch (err) { toast(err.message, 'error'); }
       });
     });
     list.appendChild(item);
@@ -291,13 +405,17 @@ function renderList(files) {
 
 async function loadFiles() {
   try {
-    const files = await sg.list();
+    const files = await api.list();
     allFiles = (Array.isArray(files) ? files : (files.files || files))
       .filter(f => f.name !== '.storegit')
-      .sort((a, b) => (!a.uploadedAt&&!b.uploadedAt)?0:(!a.uploadedAt?1:!b.uploadedAt?-1:new Date(b.uploadedAt)-new Date(a.uploadedAt)));
+      .sort((a, b) =>
+        (!a.uploadedAt && !b.uploadedAt) ? 0 :
+        !a.uploadedAt ? 1 : !b.uploadedAt ? -1 :
+        new Date(b.uploadedAt) - new Date(a.uploadedAt)
+      );
     renderList(allFiles);
-    const total = allFiles.reduce((s, f) => s + (f.size||0), 0);
-    $('storage-badge').textContent = total < 1024 ? total+'B' : total < 1048576 ? (total/1024).toFixed(1)+'KB' : (total/1048576).toFixed(1)+'MB';
+    const total = allFiles.reduce((s, f) => s + (f.size || 0), 0);
+    $('storage-badge').textContent = fmtSize(total) || '0B';
   } catch (err) { toast('Load failed: ' + err.message, 'error'); }
 }
 
@@ -308,25 +426,21 @@ $('refresh-btn').addEventListener('click', async () => {
   $('refresh-btn').style.opacity = '';
   toast('Refreshed', 'success');
 });
-$('signout-btn').addEventListener('click', () => {
-  confirm('Sign out?', 'Your API key will be removed from this device.', () => {
-    localStorage.removeItem(KEY_STORAGE);
-    sg = null;
-    $('setup').classList.add('show');
-  });
-});
 
+// ── Read / view a file ────────────────────────────────────────
 async function openFile(f) {
   currentFile = f;
-  $('read-title').textContent = f.originalName || f.name;
+  $('read-title').textContent  = f.originalName || f.name;
   $('read-content').textContent = 'Loading…';
   showPanel('read');
   try {
-    $('read-content').textContent = await sg.read(f.originalName || f.name);
-  } catch (err) { $('read-content').textContent = 'Could not load: ' + err.message; }
+    $('read-content').textContent = await api.readText(f.originalName || f.name);
+  } catch (err) {
+    $('read-content').textContent = 'Could not load: ' + err.message;
+  }
 }
-$('read-back').addEventListener('click', () => { showPanel('vault'); currentFile = null; });
-$('read-dl').addEventListener('click',   () => { if (currentFile) sg.download(currentFile.originalName || currentFile.name).catch(err => toast(err.message,'error')); });
+$('read-back').addEventListener('click',  () => { showPanel('vault'); currentFile = null; });
+$('read-dl').addEventListener('click',    () => { if (currentFile) api.saveAs(currentFile.originalName || currentFile.name).catch(err => toast(err.message, 'error')); });
 $('read-copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('read-content').textContent); toast('Copied', 'success'); }
   catch { toast('Copy not supported', 'error'); }
@@ -335,25 +449,33 @@ $('read-del').addEventListener('click', () => {
   if (!currentFile) return;
   const name = currentFile.originalName || currentFile.name;
   confirm('Delete note?', name, async () => {
-    try { await sg.delete(currentFile.name, currentFile.sha); toast('Deleted', 'success'); showPanel('vault'); currentFile = null; await loadFiles(); }
-    catch (err) { toast(err.message, 'error'); }
+    try {
+      await api.delete(currentFile.name, currentFile.sha, currentFile.chunked);
+      toast('Deleted', 'success');
+      showPanel('vault');
+      currentFile = null;
+      await loadFiles();
+    } catch (err) { toast(err.message, 'error'); }
   });
 });
 
+// ── Write / editor ────────────────────────────────────────────
 document.querySelectorAll('.ext-chip').forEach(c => c.addEventListener('click', () => {
   document.querySelectorAll('.ext-chip').forEach(x => x.classList.remove('active'));
-  c.classList.add('active'); activeExt = c.dataset.ext;
+  c.classList.add('active');
+  activeExt = c.dataset.ext;
 }));
 const editor = $('editor');
 editor.addEventListener('input', () => {
   const ch = editor.value.length, ln = editor.value.split('\n').length;
-  $('editor-info').textContent = `${ch} char${ch!==1?'s':''} · ${ln} line${ln!==1?'s':''}`;
+  $('editor-info').textContent = `${ch} char${ch !== 1 ? 's' : ''} · ${ln} line${ln !== 1 ? 's' : ''}`;
   $('save-btn').disabled = !editor.value.trim();
 });
 $('clear-btn').addEventListener('click', () => {
   if (!editor.value.trim()) return;
   confirm('Clear editor?', 'This will erase your draft.', () => {
-    editor.value = ''; $('note-title').value = '';
+    editor.value = '';
+    $('note-title').value = '';
     $('editor-info').textContent = '0 chars · 1 line';
     $('save-btn').disabled = true;
   });
@@ -367,50 +489,20 @@ $('save-btn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.innerHTML = '<div class="loader-ring"></div> Saving…';
   try {
-    await sg.upload(name, content);
+    await api.upload(name, content);
     toast('Saved as ' + name, 'success');
-    editor.value = ''; $('note-title').value = '';
+    editor.value = '';
+    $('note-title').value = '';
     $('editor-info').textContent = '0 chars · 1 line';
-    await loadFiles(); showPanel('vault');
+    await loadFiles();
+    showPanel('vault');
   } catch (err) { toast(err.message, 'error'); }
   btn.disabled = false;
   btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save to Vault';
 });
 
-async function init(key) {
-  sg = new StoreGit({ apiKey: key });
-  try {
-    await sg.list();
-    localStorage.setItem(KEY_STORAGE, key);
-    $('setup').classList.remove('show');
-    await loadFiles();
-  } catch (err) {
-    sg = null;
-    throw err;
-  }
-}
-
-$('setup-btn').addEventListener('click', async () => {
-  const key = $('setup-key').value.trim();
-  const err = $('setup-err');
-  err.textContent = '';
-  if (!key.startsWith('sgk_')) { err.textContent = 'Key must start with sgk_'; return; }
-  const btn = $('setup-btn');
-  btn.disabled = true; btn.innerHTML = '<div class="loader-ring"></div>';
-  try { await init(key); }
-  catch (e) { err.textContent = e.message.replace('StoreGit: ',''); }
-  btn.disabled = false; btn.textContent = 'Connect';
-});
-$('setup-key').addEventListener('keydown', e => { if (e.key === 'Enter') $('setup-btn').click(); });
-
-(async () => {
-  const saved = localStorage.getItem(KEY_STORAGE);
-  if (saved) {
-    try { await init(saved); return; } catch {}
-    localStorage.removeItem(KEY_STORAGE);
-  }
-  $('setup').classList.add('show');
-})();
+// ── Boot ──────────────────────────────────────────────────────
+loadFiles();
 </script>
 </body>
 </html>
